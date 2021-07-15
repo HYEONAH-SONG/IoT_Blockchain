@@ -1,9 +1,13 @@
-from cryptography.fernet import Fernet  # symmetric encryption
-import json
 from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from cryptography.fernet import Fernet # symmetric encryption
+from django.http import JsonResponse
+
+import json
+
+
 '''
 req_body={
 	"time": "2021-07-07",
@@ -20,26 +24,15 @@ block={
 		"timestamp": ""
 	},
 	"data": {
-		"channel_id": "",
+		"channel_name": "",
 		"sensor_val": "",
 		"service_val": "",
 		"runtime": ""
 	}
 }
-
-block={
-    "satisfaction": "",
-    "previous_block_id": "",
-    "current_block_id": "",
-    "timestamp": "",
-    "channel_id": "",
-    "sensor_val": "",
-    "service_val": "",
-    "runtime": ""
-}
 '''
 
-# 암복호화 클래스
+# 블록 id 암호화 기능
 class SimpleEnDecrypt:
     def __init__(self, key=None):
         if key is None:  # 키가 없다면
@@ -47,7 +40,6 @@ class SimpleEnDecrypt:
         self.key = key
         self.f = Fernet(self.key)
 
-    # Encryption Function
     def encrypt(self, data, is_out_string=True):
         if isinstance(data, bytes):
             ou = self.f.encrypt(data)  # 바이트형태이면 바로 암호화
@@ -58,7 +50,6 @@ class SimpleEnDecrypt:
         else:
             return ou
 
-     # Decryption Funtion
     def decrypt(self, data, is_out_string=True):
         if isinstance(data, bytes):
             ou = self.f.decrypt(data)  # 바이트형태이면 바로 복호화
@@ -69,10 +60,13 @@ class SimpleEnDecrypt:
         else:
             return ou
 
-# 블록 정보 클래스
-class Block():
 
-    def __init__(self, index, timestamp, channel_name, sensor_val, service_val):
+
+
+
+# 블록 class
+class Block():
+    def __init__(self, index,timestamp, channel_name, sensor_val, service_val):
         self.index = index
         self.satisfaction = ""
         self.previous_block_id = ""
@@ -83,76 +77,97 @@ class Block():
         self.service_val = service_val
         self.runtime = ""
 
-    # 블록 ID 해시 생성
-    def calHash(self, timestamp, index):
+
+    def calHash(self,timestamp, index):
         simpleEnDecrypt = SimpleEnDecrypt()
-        message = timestamp + str(index)
+        message  = timestamp + str(index)
         return simpleEnDecrypt.encrypt(message)
 
 
-# 블록체인에서의 블록 생성 클래스
+
+# 블록체인에서의 블록 생성
 class BlockChain:
     def __init__(self):
         self.chain = []
         self.createGenesis()
 
+
     def createGenesis(self):
-        self.chain.append(Block(0, "", "", "", ""))
+        self.chain.append(Block(0,"","","",""))
+
 
     def addBlock(self, nBlock):
-        nBlock.previous_block_id = self.chain[len(self.chain) - 1].current_block_id
+        nBlock.previous_block_id = self.chain[len(self.chain)-1].current_block_id
         nBlock.current_block_id = nBlock.calHash(nBlock.timestamp, nBlock.index)
         self.chain.append(nBlock)
 
+
+
     def getLatestBlock(self):
-        return self.chain[len(self.chain) - 1]
+        return self.chain[len(self.chain)-1]
+
 
     def isValid(self):
         i = 1
-        while (i < len(self.chain)):
-            if (self.chain[i].current_block_id != self.chain[i].calHash()):
+        while(i<len(self.chain)):
+            if(self.chain[i].current_block_id != self.chain[i].calHash()):
                 return False
-            if (self.chain[i].previous_block_id != self.chain[i - 1].hash):
+            if(self.chain[i].previous_block_id != self.chain[i-1].hash):
                 return False
+
             i += 1
         return True
 
+
+
 block = BlockChain()
+
 
 class IoT_BlockChain_block(APIView):
 
-    # 블록 생성 API
     def post(self, request):
         global block
 
-        body_unicode = request.body.decode('utf-8')
+        body_unicode  = request.body.decode('utf-8')
         body = json.loads(body_unicode)
-
+        
         req_timestamp = body['time']
         req_channel_name = body['channel_name']
         req_sensor_val = body['sensor_val']
         req_service_val = body['service_val']
 
-        block.addBlock(Block(len(block.chain), req_timestamp, req_channel_name, req_sensor_val, req_service_val))
+
+        block.addBlock(Block(len(block.chain),req_timestamp,req_channel_name,req_sensor_val,req_service_val))
+
 
         # 마지막 블록
         for recent_block in block.chain:
             continue
+        
 
-        return Response(json.dumps(vars(recent_block)), status=200)
+        blockJSONData = json.dumps(vars(recent_block))
+        blockJSON = json.loads(blockJSONData)
+        print(type(blockJSON))
+        return JsonResponse(blockJSON, safe=False, status = 200)
 
-    # 해당 채널의 블록 정보 읽기 API
+
     def get(self, request):
-        get_channel = request.GET.get('channel_name') # get은 para로 받을 것
-        send_block = []
+        # para로 받을 것    
+
+        get_channel = request.GET.get('channel_name')
+        send_block={}
 
         for find_block in block.chain:
             json_find_block = json.dumps(vars(find_block))
             dict_block = json.loads(json_find_block)
-
             if dict_block["channel_name"] == get_channel:
-                send_block.append(json.dumps(vars(find_block)))
+                send_block[dict_block["index"]]=dict_block
+                # send_block.append(json.dumps(vars(find_block)))
+        
+        if len(send_block)==0:
+            return Response("There is no block in this channel", status = 200)
 
-        if len(send_block) == 0:
-            return Response("There is no block in this channel", status=200)
-        return Response(json.dumps(send_block), status=200)
+
+  
+
+        return JsonResponse(send_block, safe=False, status = 200)
